@@ -199,15 +199,11 @@ toV1Account snapshot account =
 
 
 -- | Converts a Kernel 'HdAddress' into a V1 'WalletAddress'.
-toWalletAddress :: Kernel.DB
-                -> HD.HdAddress
-                -> V1.WalletAddress
+toWalletAddress :: Kernel.DB -> HD.HdAddress -> V1.WalletAddress
 toWalletAddress db hdAddress =
     let cardanoAddress = hdAddress ^. HD.hdAddressAddress . fromDb
         hdAccountId = hdAddress ^. HD.hdAddressId . HD.hdAddressIdParent
-    in case Kernel.lookupAddressMeta db hdAccountId cardanoAddress of
-           Nothing -> V1.WalletAddress (V1 cardanoAddress) False False
-           Just addressMeta ->
-               V1.WalletAddress (V1 cardanoAddress)
-                                (addressMeta ^. addressMetaIsUsed)
-                                (addressMeta ^. addressMetaIsChange)
+        addressMeta = Kernel.readAddressMeta db hdAccountId cardanoAddress
+    in V1.WalletAddress (V1 cardanoAddress)
+                        (addressMeta ^. addressMetaIsUsed)
+                        (addressMeta ^. addressMetaIsChange)

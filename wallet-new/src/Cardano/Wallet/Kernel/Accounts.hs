@@ -25,15 +25,11 @@ import           Cardano.Wallet.Kernel.DB.AcidState (CreateHdAccount (..), DB,
                      DeleteHdAccount (..), UpdateHdAccountName (..))
 import           Cardano.Wallet.Kernel.DB.HdWallet (AccountName (..),
                      HdAccount (..), HdAccountId (..), HdAccountIx (..),
-                     HdRootId, hdAccountIdParent, hdAccountName)
+                     HdRootId, UnknownHdAccount (..), hdAccountName)
 import           Cardano.Wallet.Kernel.DB.HdWallet.Create
                      (CreateHdAccountError (..), initHdAccount)
-import           Cardano.Wallet.Kernel.DB.HdWallet.Delete
-                     (DeleteHdAccountError (..))
 import           Cardano.Wallet.Kernel.DB.HdWallet.Derivation
                      (HardeningMode (..), deriveIndex)
-import           Cardano.Wallet.Kernel.DB.HdWallet.Update
-                     (UpdateHdAccountError (..))
 import           Cardano.Wallet.Kernel.DB.InDb (InDb (..))
 import           Cardano.Wallet.Kernel.DB.Spec (Checkpoint (..), emptyPending)
 import           Cardano.Wallet.Kernel.Internal (PassiveWallet, walletKeystore,
@@ -71,14 +67,14 @@ instance Exception CreateAccountError
 --
 
 data DeleteAccountError =
-      DeleteAccountUnknownHdRoot HdRootId
-      -- ^ When trying to delete the 'Account', the parent 'HdRoot' was not
-      -- there.
+      DeleteAccountError UnknownHdAccount
+      -- ^ When trying to delete the 'Account', the parent 'HdRoot' or the
+      -- 'Account' itself was not there.
     deriving Eq
 
 instance Buildable DeleteAccountError where
-    build (DeleteAccountUnknownHdRoot uRoot) =
-        bprint ("DeleteAccountUnknownHdRoot " % F.build) uRoot
+    build (DeleteAccountError dbErr) =
+        bprint ("DeleteAccountError " % F.build) dbErr
 
 instance Show DeleteAccountError where
     show = formatToString build
@@ -89,18 +85,14 @@ instance Exception DeleteAccountError
 -- Update-related errors
 
 data UpdateAccountError =
-      UpdateAccountUnknownHdRoot HdRootId
-      -- ^ When trying to update the 'Account', the parent 'HdRoot' was not
-      -- there.
-    | UpdateAccountUnknownHdAccount HdAccountId
-      -- ^ When trying to update the 'Account', the account was not there.
+      UpdateAccountError UnknownHdAccount
+      -- ^ When trying to update the 'Account', the parent 'HdRoot' or the
+      -- account itself were not there.
     deriving Eq
 
 instance Buildable UpdateAccountError where
-    build (UpdateAccountUnknownHdRoot uRoot) =
-        bprint ("UpdateAccountUnknownHdRoot " % F.build) uRoot
-    build (UpdateAccountUnknownHdAccount uAccount) =
-        bprint ("UpdateAccountUnknownHdAccount " % F.build) uAccount
+    build (UpdateAccountError dbError) =
+        bprint ("UpdateAccountError " % F.build) dbError
 
 instance Show UpdateAccountError where
     show = formatToString build
@@ -121,7 +113,7 @@ createAccount :: PassPhrase
 createAccount spendingPassword accountName walletId pw = do
     let keystore = pw ^. walletKeystore
     case walletId of
-         (WalletIdHdRnd hdRootId) -> do
+         WalletIdHdRnd hdRootId -> do
              mbEsk <- Keystore.lookup (WalletIdHdRnd hdRootId) keystore
              case mbEsk of
                   Nothing  -> return (Left $ CreateAccountKeystoreNotFound walletId)
@@ -159,7 +151,7 @@ createHdRndAccount _spendingPassword accountName _esk rootId pw = do
         tryGenerateAccount gen collisions = do
             newIndex <- deriveIndex (flip uniformR gen) HdAccountIx HardDerivation
             let hdAccountId = HdAccountId rootId newIndex
-                newAccount  = initHdAccount hdAccountId genesisCheckpoint &
+                newAccount  = initHdAccount hdAccountId firstCheckpoint &
                               hdAccountName .~ accountName
                 db = pw ^. wallets
             res <- update db (CreateHdAccount newAccount)
@@ -170,12 +162,19 @@ createHdRndAccount _spendingPassword accountName _esk rootId pw = do
                      return (Left $ CreateAccountUnknownHdRoot rootId)
                  Right () -> return (Right newAccount)
 
-        -- The maximum number of allowed collisions.
+        -- The maximum number of allowed collisions. This number was
+        -- empirically calculated based on a [beta distribution](https://en.wikipedia.org/wiki/Beta_distribution).
+        -- In particular, it can be shown how even picking small values for
+        -- @alpha@ and @beta@, the probability of failing after the next
+        -- collision rapidly approaches 99%. With 50 attempts, our probability
+        -- to fail is 98%, and the 42 is a nice easter egg very close to 50,
+        -- this is why it was picked.
         maxAllowedCollisions :: Word32
         maxAllowedCollisions = 42
 
-        genesisCheckpoint :: Checkpoint
-        genesisCheckpoint = Checkpoint {
+        -- | The first 'Checkpoint' known to this 'Account'.
+        firstCheckpoint :: Checkpoint
+        firstCheckpoint = Checkpoint {
               _checkpointUtxo        = InDb mempty
             , _checkpointUtxoBalance = InDb (mkCoin 0)
             , _checkpointPending     = emptyPending
@@ -188,9 +187,8 @@ deleteAccount :: HdAccountId -> PassiveWallet -> IO (Either DeleteAccountError (
 deleteAccount hdAccountId pw = do
     res <- liftIO $ update (pw ^. wallets) (DeleteHdAccount hdAccountId)
     return $ case res of
-         Left (DeleteHdAccountUnknownRoot _unknownRoot) ->
-             Left (DeleteAccountUnknownHdRoot (hdAccountId ^. hdAccountIdParent))
-         Right () -> Right ()
+         Left dbErr -> Left (DeleteAccountError dbErr)
+         Right ()   -> Right ()
 
 -- | Updates an HD 'Account'.
 updateAccount :: HdAccountId
@@ -201,8 +199,5 @@ updateAccount :: HdAccountId
 updateAccount hdAccountId newAccountName pw = do
     res <- liftIO $ update (pw ^. wallets) (UpdateHdAccountName hdAccountId newAccountName)
     return $ case res of
-         Left (UpdateHdAccountUnknownRoot _unknownRoot) ->
-             Left (UpdateAccountUnknownHdRoot (hdAccountId ^. hdAccountIdParent))
-         Left (UpdateHdAccountUnknownAccount _unknownAccount) ->
-             Left (UpdateAccountUnknownHdAccount hdAccountId)
+         Left dbError        -> Left (UpdateAccountError dbError)
          Right (db, account) -> Right (db, account)

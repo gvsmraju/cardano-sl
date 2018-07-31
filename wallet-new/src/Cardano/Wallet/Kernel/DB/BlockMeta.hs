@@ -59,19 +59,26 @@ instance SafeCopy (InDb (Map Core.Address AddressMeta)) where
 
 deriveSafeCopy 1 'base ''BlockMeta
 
+instance Semigroup AddressMeta where
+  a <> b = mergeAddrMeta a b
+    where
+      mergeAddrMeta :: AddressMeta -> AddressMeta -> AddressMeta
+      mergeAddrMeta (AddressMeta used change) (AddressMeta used' change')
+          = AddressMeta (used || used') (change `xor` change')
+
+instance Monoid AddressMeta where
+  mempty  = AddressMeta False False
+  mappend = (<>)
+
 -- | Monoid instance to update 'BlockMeta' in 'applyBlock' (see wallet spec)
 instance Semigroup BlockMeta where
   a <> b = BlockMeta {
           _blockMetaSlotId = combineUsing (liftA2 Map.union) _blockMetaSlotId
         ,
           _blockMetaAddressMeta
-              = combineUsing (liftA2 (Map.unionWith mergeAddrMeta)) _blockMetaAddressMeta
+              = combineUsing (liftA2 (Map.unionWith (<>))) _blockMetaAddressMeta
     }
     where
-      mergeAddrMeta :: AddressMeta -> AddressMeta -> AddressMeta
-      mergeAddrMeta (AddressMeta used change) (AddressMeta used' change')
-          = AddressMeta (used || used') (change `xor` change')
-
       combineUsing :: (a -> a -> a) -> (BlockMeta -> a) -> a
       combineUsing op f = f a `op` f b
 

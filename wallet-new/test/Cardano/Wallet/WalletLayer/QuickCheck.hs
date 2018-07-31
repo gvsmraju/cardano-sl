@@ -101,8 +101,7 @@ instance Arbitrary GetAccountsError where
                       ]
 
 instance Arbitrary Kernel.UpdateAccountError where
-    arbitrary = oneof [ Kernel.UpdateAccountUnknownHdRoot <$> arbitrary
-                      , Kernel.UpdateAccountUnknownHdAccount <$> arbitrary
+    arbitrary = oneof [ Kernel.UpdateAccountError <$> arbitrary
                       ]
 
 instance Arbitrary UpdateAccountError where
@@ -111,7 +110,7 @@ instance Arbitrary UpdateAccountError where
                       ]
 
 instance Arbitrary Kernel.DeleteAccountError where
-    arbitrary = oneof [ Kernel.DeleteAccountUnknownHdRoot <$> arbitrary
+    arbitrary = oneof [ Kernel.DeleteAccountError <$> arbitrary
                       ]
 
 instance Arbitrary DeleteAccountError where

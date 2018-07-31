@@ -6,7 +6,7 @@ module Cardano.Wallet.Kernel.DB.Read (
   , accountTotalBalance
   , accountAddresses
   , hdWallets
-  , lookupAddressMeta
+  , readAddressMeta
   ) where
 
 import           Universum
@@ -87,23 +87,17 @@ accountAddresses snapshot accountId
 hdWallets :: DB -> HdWallets
 hdWallets snapshot = snapshot ^. dbHdWallets
 
--- | Lookup the given 'Address' in the 'HdAccount' current checkpoint.
--- This getter returns a 'Maybe' because in case of freshly-generated
--- addresses (which has to be yet incorporated into a block) this lookup might
--- fail, but upstream consumers might want to deal with this gracefully (for
--- example in case a new prestine account is populated with many addresses and
--- the same account is requested by the web API).
-lookupAddressMeta :: DB
-                  -> HdAccountId
-                  -> Address
-                  -> Maybe AddressMeta
-lookupAddressMeta snapshot accountId cardanoAddress
-    = getAddressMeta $ walletQuery' snapshot checkpoint
+-- | Reads the given 'Address' in the 'HdAccount' current checkpoint.
+-- It relies on the 'Monoid' instance for an 'AddressMeta' in case such
+-- 'AddressMeta' cannot be found.
+readAddressMeta :: DB -> HdAccountId -> Address -> AddressMeta
+readAddressMeta snapshot accountId cardanoAddress
+    = fromMaybe mempty $ lookupAddressMeta $ walletQuery' snapshot checkpoint
     where
         checkpoint = readHdAccountCurrentCheckpoint accountId
 
-        getAddressMeta :: Checkpoint -> Maybe AddressMeta
-        getAddressMeta currentCheckpoint =
+        lookupAddressMeta :: Checkpoint -> Maybe AddressMeta
+        lookupAddressMeta currentCheckpoint =
             currentCheckpoint ^. checkpointBlockMeta
                                . blockMetaAddressMeta
                                . fromDb
