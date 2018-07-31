@@ -8,9 +8,10 @@ module Cardano.Wallet.WalletLayer.Kernel
 
 import           Universum
 
+import qualified Control.Concurrent.STM as STM
+import qualified Control.Exception.Safe as Ex
 import           Control.Lens (to)
 import           Data.Coerce (coerce)
-import           Data.Default (def)
 import           Data.Maybe (fromJust)
 import           Data.Time.Units (Second)
 import           Formatting (build, sformat)
@@ -41,7 +42,6 @@ import           Cardano.Wallet.Kernel.CoinSelection.FromGeneric
                      (CoinSelectionOptions (..), ExpenseRegulation,
                      InputGrouping, newOptions)
 
-import qualified Cardano.Wallet.Kernel.BIP39 as BIP39
 import           Pos.Core (Address, Coin, decodeTextAddress, mkCoin)
 import qualified Pos.Core as Core
 import           Pos.Core.Chrono (OldestFirst (..))
@@ -66,32 +66,18 @@ bracketPassiveWallet
     -> (PassiveWalletLayer n -> Kernel.PassiveWallet -> m a) -> m a
 bracketPassiveWallet logFunction keystore rocksDB f =
     Kernel.bracketPassiveWallet logFunction keystore rocksDB $ \w -> do
-
-      -- Create the wallet worker and its communication endpoint `invoke`.
-      bracket (liftIO $ Actions.forkWalletWorker $ Actions.WalletActionInterp
-                 { Actions.applyBlocks  =  \blunds ->
-                     Kernel.applyBlocks w $
-                         OldestFirst (mapMaybe blundToResolvedBlock (toList (getOldestFirst blunds)))
-                 , Actions.switchToFork = \_ _ -> logFunction Debug "<switchToFork>"
-                 , Actions.emit         = logFunction Debug
-                 }
-              ) (\invoke -> liftIO (invoke Actions.Shutdown))
-              $ \invoke -> do
-                  -- TODO (temporary): build a sample wallet from a backup phrase
-                  _ <- liftIO $ do
-                    Kernel.createHdWallet w
-                                          (def @(BIP39.Mnemonic 12))
-                                          emptyPassphrase
-                                          assuranceLevel
-                                          walletName
-
-                  f (passiveWalletLayer w invoke) w
-
+      let wai = Actions.WalletActionInterp
+                 { Actions.applyBlocks = \blunds ->
+                     Kernel.applyBlocks w
+                        (OldestFirst (mapMaybe blundToResolvedBlock
+                           (toList (getOldestFirst blunds))))
+                 , Actions.switchToFork = \_ _ ->
+                     logFunction Debug "<switchToFork>"
+                 , Actions.emit = logFunction Debug }
+      Actions.withWalletWorker wai $ \send -> do
+         Ex.finally (f (passiveWalletLayer w (STM.atomically . send)) w)
+                    (liftIO (STM.atomically (send Actions.Shutdown)))
   where
-    -- TODO consider defaults
-    walletName       = HD.WalletName "(new wallet)"
-    assuranceLevel   = HD.AssuranceLevelNormal
-
     -- | TODO(ks): Currently not implemented!
     passiveWalletLayer :: Kernel.PassiveWallet
                        -> (Actions.WalletAction Blund -> IO ())
@@ -109,11 +95,11 @@ bracketPassiveWallet logFunction keystore rocksDB f =
                                        V1.NormalAssurance -> HD.AssuranceLevelNormal
                                        V1.StrictAssurance -> HD.AssuranceLevelStrict
 
-                                 res <- liftIO $ Kernel.createHdWallet wallet
-                                                                       mnemonic
-                                                                       spendingPassword
-                                                                       hdAssuranceLevel
-                                                                       (HD.WalletName v1WalletName)
+                                 res <- Kernel.createHdWallet wallet
+                                                              mnemonic
+                                                              spendingPassword
+                                                              hdAssuranceLevel
+                                                              (HD.WalletName v1WalletName)
                                  case res of
                                       Left kernelError ->
                                           return (Left $ CreateWalletError kernelError)

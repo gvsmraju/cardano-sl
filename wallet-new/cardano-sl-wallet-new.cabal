@@ -173,6 +173,7 @@ library
                      , lens
                      , log-warper
                      , memory
+                     , mmorph
                      , mtl
                      , mwc-random
                      , neat-interpolation
@@ -196,6 +197,7 @@ library
                      , servant-swagger-ui-redoc
                      , sqlite-simple
                      , sqlite-simple-errors
+                     , stm
                      , swagger2
                      , text
                      , time

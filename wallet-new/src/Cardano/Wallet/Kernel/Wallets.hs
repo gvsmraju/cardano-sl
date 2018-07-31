@@ -59,7 +59,9 @@ instance Exception CreateWalletError
 -------------------------------------------------------------------------------}
 
 -- | Creates a new HD 'Wallet'.
-createHdWallet :: PassiveWallet
+createHdWallet
+             :: MonadIO m
+             => PassiveWallet
              -> Mnemonic nat
              -- ^ The set of words (i.e the mnemonic) to generate the initial seed.
              -- See <https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#From_mnemonic_to_seed>
@@ -77,8 +79,8 @@ createHdWallet :: PassiveWallet
              -- range (@low@, @medium@, @high@).
              -> WalletName
              -- ^ The name for this wallet.
-             -> IO (Either CreateWalletError HdRoot)
-createHdWallet pw mnemonic spendingPassword assuranceLevel walletName = do
+             -> m (Either CreateWalletError HdRoot)
+createHdWallet pw mnemonic spendingPassword assuranceLevel walletName = liftIO $ do
     -- STEP 1: Generate the 'EncryptedSecretKey' outside any acid-state
     -- transaction, to not leak it into acid-state's transaction logs.
     let (_, esk) = safeDeterministicKeyGen (BIP39.mnemonicToSeed mnemonic) spendingPassword

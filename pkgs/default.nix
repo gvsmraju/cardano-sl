@@ -17760,6 +17760,7 @@ license = stdenv.lib.licenses.mit;
 , lens
 , log-warper
 , memory
+, mmorph
 , mtl
 , mwc-random
 , neat-interpolation
@@ -17865,6 +17866,7 @@ json-sop
 lens
 log-warper
 memory
+mmorph
 mtl
 mwc-random
 neat-interpolation
@@ -17887,6 +17889,7 @@ servant-swagger-ui-core
 servant-swagger-ui-redoc
 sqlite-simple
 sqlite-simple-errors
+stm
 swagger2
 text
 time
